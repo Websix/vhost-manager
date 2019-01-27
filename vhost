@@ -25,11 +25,20 @@ PORT=""
 # pasta dos arquivos
 WEBROOT=""
 
+# Pasta de instalação padrão
+INSTALL_PATH="/usr/bin"
+
 # Template padrao para o vhost apache
 TEMPLATE="/etc/vhost/template.conf"
 
 # Template padrao para a pool do php5-fpm
 POOL_TEMPLATE="/etc/vhost/pool-template.conf"
+
+# Folder location where to store the available vhost configurations
+VHOSTS_AVAILABLE_PATH="/etc/apache2/sites-available"
+
+# Folder location where to store the enabled vhost configurations
+VHOSTS_ENABLED_PATH="/etc/apache2/sites-enabled"
 
 # Se sera gerado um vhost com php5-fpm
 HAS_POOL_TEMPLATE="0"
@@ -71,6 +80,22 @@ echo-yellow() {
     echo -e "${YELLOW}$1${NC}"
 }
 
+unameOut="$(uname -s)"
+case "${unameOut}" in
+    Linux*)
+        OS=Linux
+        ;;
+    Darwin*)
+        OS=Mac
+        INSTALL_PATH="/usr/local/bin"
+        VHOSTS_AVAILABLE_PATH="/usr/local/etc/httpd/extra/vhosts"
+        VHOSTS_ENABLED_PATH="/usr/local/etc/httpd/extra/vhosts"
+        ;;
+    CYGWIN*) OS=Cygwin;;
+    MINGW*) OS=MinGw;;
+    *) OS="UNKNOWN:${unameOut}"
+esac
+echo-yellow "Running on ${OS}"
 
 #
 # Shows info on the authors and the program
@@ -81,6 +106,7 @@ vhost-credits() {
     cat <<splash
 Vhost Manager v1.2.0 Created by Rubens Fernandes <rubensdrk@gmail.com>
     php-fm support by Reinaldo A. C. Rauch <reinaldorauch@gmail.com>
+    Mac OS support by Anderson Ivan Witzke <http://github.com/ivanwitzke>
 splash
     echo -e "${NC}"
 
@@ -150,7 +176,7 @@ vhost-install() {
 
     #cp template.conf template-phpfpm.conf template-pool.conf $CONFDIR
     cp -r $(pwd)/. $CONFDIR
-    ln -s -f $CONFDIR/vhost /usr/bin/vhost
+    ln -s -f $CONFDIR/vhost $INSTALL_PATH/vhost
 
     echo-green "Script installed! use: vhost"
 
@@ -185,15 +211,24 @@ vhost-update() {
 vhost-remove() {
     vhost-verify-sudo;
     FPM_POOL_CONF="/etc/php5/fpm/pool.d/$CONFNAME"
+    if [[ ! -f "$VHOSTS_AVAILABLE_PATH/$CONFNAME" ]]; then
+        echo-red "Vhost $CONFNAME not found"
+        exit 0
+    fi
 
     echo-yellow "Removendo $URL de /etc/hosts."
-    sed -i '/'$URL'/d' /etc/hosts
+    sed -i '' '/'$URL'/d' /etc/hosts
 
     echo-yellow "Desativando e deletando $CONFNAME virtual host."
-    a2dissite $CONFNAME
-
-    rm "/etc/apache2/sites-available/$CONFNAME"
-    service apache2 reload
+    if [ "$OS" == "Linux" ];
+    then
+        a2dissite $CONFNAME
+        rm "$VHOSTS_AVAILABLE_PATH/$CONFNAME"
+        service apache2 reload
+    elif [[ "$OS" == "Mac" ]]; then
+        rm "$VHOSTS_AVAILABLE_PATH/$CONFNAME"
+        apachectl restart
+    fi
 
     if [ -f "$FPM_POOL_CONF" ]; then
         echo-yellow "Desativando pool do php5-fpm"
@@ -211,10 +246,10 @@ vhost-remove() {
 vhost-list() {
 
     echo-yellow "Virtual hosts avaliable:"
-    ls -1 "/etc/apache2/sites-available/"
+    ls -1 "$VHOSTS_AVAILABLE_PATH"
 
     echo-green "Virtual hosts enabled:"
-    ls -1 "/etc/apache2/sites-enabled/"
+    ls -1 "$VHOSTS_ENABLED_PATH"
 
     exit 0
 
@@ -273,8 +308,8 @@ vhost-generate-pool() {
     FPM_POOL_CONF="/etc/php5/fpm/pool.d/$CONFNAME"
 
     cp $POOL_TEMPLATE $FPM_POOL_CONF
-    sed -i 's#template.webroot#'$WEBROOT'#g' $FPM_POOL_CONF
-    sed -i 's#template.name#'$NAME'#g' $FPM_POOL_CONF
+    sed -i '' 's#template.webroot#'$WEBROOT'#g' $FPM_POOL_CONF
+    sed -i '' 's#template.name#'$NAME'#g' $FPM_POOL_CONF
 
 }
 
@@ -285,16 +320,16 @@ vhost-generate-vhost() {
     vhost-verify-sudo;
     echo-green "Creating $NAME virtual host with webroot: $WEBROOT"
 
-    APACHE_CONF="/etc/apache2/sites-available/$CONFNAME"
+    APACHE_CONF="$VHOSTS_AVAILABLE_PATH/$CONFNAME"
 
     cp $TEMPLATE $APACHE_CONF
 
-    sed -i 's#template.email#'$EMAIL'#g' $APACHE_CONF
-    sed -i 's#template.url#'$URL'#g' $APACHE_CONF
-    sed -i 's#template.webroot#'$WEBROOT'#g' $APACHE_CONF
-    sed -i 's#template.name#'$NAME'#g' $APACHE_CONF
-    sed -i 's#template.logpath#'$LOGPATH'#g' $APACHE_CONF
-    sed -i 's#template.port#'$PORT'#g' $APACHE_CONF
+    sed -i '' 's#template.email#'$EMAIL'#g' $APACHE_CONF
+    sed -i '' 's#template.url#'$URL'#g' $APACHE_CONF
+    sed -i '' 's#template.webroot#'$WEBROOT'#g' $APACHE_CONF
+    sed -i '' 's#template.name#'$NAME'#g' $APACHE_CONF
+    sed -i '' 's#template.logpath#'$LOGPATH'#g' $APACHE_CONF
+    sed -i '' 's#template.port#'$PORT'#g' $APACHE_CONF
     if [ $HAS_POOL_TEMPLATE = "1" ]; then
         vhost-generate-pool;
     fi
@@ -319,28 +354,29 @@ vhost-add-url() {
     then
         echo-yellow "Url already exists"
     else
-        sed -i '1s/^/127.0.0.1       '$URL'\n/' $HOSTS_PATH
+        sed -i '' '1s/^/127.0.0.1       '$URL'\n/' $HOSTS_PATH
     fi
 
 }
 
 #
-# Reloads apache server andm php5-fpm, if required
+# Reloads apache server and php5-fpm, if required
 #
 vhost-enable-reload() {
     vhost-verify-sudo;
-    a2ensite $CONFNAME
+    if [ "$OS" == "Linux" ]
+    then
+        a2ensite $CONFNAME
+        service apache2 reload
 
-    service apache2 reload
-
-    echo-green "Virtual host $CONFNAME created with webroot $WEBROOT for url http://$URL"
-
-    if [ $HAS_POOL_TEMPLATE = "1" ]; then
-        service php5-fpm reload
-        echo-green "Pool for site with host and pool $CONFNAME enabled"
+        if [ $HAS_POOL_TEMPLATE = "1" ]; then
+            service php5-fpm reload
+            echo-green "Pool for site with host and pool $CONFNAME enabled"
+        fi
+    elif [ "$OS" == "Mac" ]; then
+        apachectl restart
     fi
-
-
+    echo-green "Virtual host $CONFNAME created with webroot $WEBROOT for url http://$URL"
 }
 
 #
