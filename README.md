@@ -6,7 +6,7 @@ A bash script to managet Vhost on Apache 2 linux
 First install script
 
 ```sh
-$ git clone https://github.com/rubensfernandes/vhost-manager.git
+$ git clone https://github.com/websix/vhost-manager.git
 $ cd vhost-manager
 $ sudo ./vhost -install
 ```
